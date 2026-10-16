@@ -4,3 +4,4 @@ test_files/
 scripts/
 .streamlit/.env
 .pytest_cache/
+DEPLOY.md
