@@ -1,28 +1,31 @@
 # -*- coding: utf-8 -*-
-"""埋点 + 限流（规格 4.6，D2-3a 起用 PostHog）。
+"""埋点 + 限流（规格 4.6，D2-3b 服务端直采 PostHog）。
 
-- PostHog 免费档（永久 100 万事件/月）：官方 JS 注入 + posthog.init(POSTHOG_PROJECT_API_KEY)。
-  4 个自定义事件：file_uploaded / clean_started / download_clicked / pro_click。
-  $pageview 由 PostHog JS 自动上报（门 3 分母用它）；门 2 用面板 Users 计数。
-  env POSTHOG_PROJECT_API_KEY 未设置 → 不注入 JS（不静默假上报）。
-- 事件属性脱敏：文件名只留扩展名 + 行数，不上报原始内容 / 真实文件名。
-- 限流：cookie qc_free=<ts> 在"完成清洗"时写（浏览器端，实例休眠重启不清）；
+- PostHog 服务端直采：Python 直接 POST 到 {host}/api/capture/，
+  不依赖浏览器 JS（Streamlit sanitizer 会剥离 <script>，JS 注入方案作废）。
+  key 只从 os.environ（POSTHOG_PROJECT_API_KEY）读，代码里不留任何 key 值。
+  未设置 env → 静默跳过（不阻塞应用）。
+- 事件（6 个）：page_viewed / file_uploaded / clean_started /
+  download_clicked / pro_click / clean_completed。
+  distinct_id = st.session_id（规格行 17 按它去重；门 2 = clean_completed 去重 distinct_id）。
+  事件属性脱敏：文件名只留扩展名 + 行数，不上报原始内容 / 真实文件名。
+- 限流：cookie qc_free=<ts> 在"完成清洗"时写（浏览器端，best-effort）；
   24h 内再次点 "Clean now" → 显示 PRO 引导（仍不收款）。
-  限流计数器与 "完成清洗" 统计事件分离（规格行 22），去重用 st.session_id。
-- 无任何数据落盘（cookie 在浏览器端；session_state 随实例生命周期，重启即清）。
+  限流计数器与 "完成清洗" 统计事件分离（规格行 22）。
+- 上报容错：requests.post timeout=5s，try/except 吞异常（埋点失败不崩溃应用）。
+- 无任何数据落盘。
 """
 from __future__ import annotations
 
-import json as _json
 import os
 import time
 
-# PostHog：项目 API key 通过环境变量 POSTHOG_PROJECT_API_KEY 注入；未设置 → 不注入 JS
+# PostHog：key/host 通过环境变量注入；未设置 → 不上报（不静默假上报）
 _POSTHOG_API_KEY = os.environ.get("POSTHOG_PROJECT_API_KEY", "")
 _POSTHOG_HOST = os.environ.get("POSTHOG_API_HOST", "https://us.posthog.com")
 
-# 自定义事件（$pageview 由 static.js 自动上报，门 3 分母用它；
-# clean_completed 是门 2 判据，与限流 cookie 分离）
+# 6 个事件（门 2 = clean_completed 去重 distinct_id；门 3 = pro_click ÷ page_viewed）
+EV_PAGE_VIEWED = "page_viewed"
 EV_FILE_UPLOADED = "file_uploaded"
 EV_CLEAN_STARTED = "clean_started"
 EV_DOWNLOAD_CLICKED = "download_clicked"
@@ -38,56 +41,91 @@ def _sanitize_filename(name: str) -> str:
     return name.rsplit(".", 1)[-1] if "." in name else "unknown"
 
 
-def _posthog_js_snippet() -> str | None:
-    """PostHog 官方引入：<script async src=static.js> + posthog.init(key)。
-
-    env 未设 → 返回 None（不注入，页面正常、静默不上报）。
-    key 只从 os.environ 读，代码里不留任何 key 值。
-    """
-    if not _POSTHOG_API_KEY:
-        return None
-    js = (
-        "<script async src='" + _POSTHOG_HOST + "/static.js'></script>"
-        "<script>posthog.init('" + _POSTHOG_API_KEY + "',"
-        "{api_host:'" + _POSTHOG_HOST + "'});</script>"
-    )
-    return js
-
-
-def track(event: str, props: dict | None = None, filename: str | None = None) -> None:
-    """上报一个 PostHog 事件（posthog.capture）。
-
-    env 未设 → 不注入（跳过）。filename 若传，脱敏成扩展名写入 props。
-    先注入 static.js + init（幂等），再 capture。
-    """
+def _session_id() -> str:
+    """当前 session 的 distinct_id；bare 环境无 context 时回退 'unknown'。"""
     import streamlit as st
 
+    sid = getattr(st, "session_id", None)
+    return sid if sid is not None else "unknown"
+
+
+def _capture(event: str, props: dict | None = None, filename: str | None = None) -> None:
+    """服务端直采：POST {host}/api/capture/（PostHog 官方直采端点）。
+
+    - 无 key → 直接 return（不发请求）
+    - requests.post timeout=5s，整段 try/except 吞异常（上报失败不影响应用）
+    - distinct_id = st.session_id；filename 脱敏成扩展名 + 行数
+    """
     if not _POSTHOG_API_KEY:
-        return  # 不静默假上报
+        return
+
+    import requests
+
     p = dict(props or {})
     if filename is not None:
         p["file_ext"] = _sanitize_filename(filename)
-        p["rows"] = p.get("rows", 0)
-    payload = {k: v for k, v in p.items() if isinstance(v, (str, int, float, bool))}
-    payload_js = _json.dumps(payload, ensure_ascii=False)
-    event_js = _json.dumps(event)
-    js = _posthog_js_snippet() + "<script>posthog.capture(" + event_js + "," + payload_js + ");</script>"
-    st.markdown(js, unsafe_allow_html=True)
+        p.setdefault("rows", 0)
+    # 只保留可 JSON 化标量
+    p = {k: v for k, v in p.items() if isinstance(v, (str, int, float, bool))}
+    p["distinct_id"] = _session_id()
+
+    body = {
+        "api_key": _POSTHOG_API_KEY,
+        "event": event,
+        "properties": p,
+    }
+    try:
+        requests.post(
+            f"{_POSTHOG_HOST}/api/capture/", json=body, timeout=5
+        )
+    except Exception:
+        # 埋点失败绝不阻塞 / 崩溃应用
+        pass
+
+
+# ---------------------------------------------------------------------------
+# 事件上报（调用处签名不变）
+# ---------------------------------------------------------------------------
+
+def track(event: str, props: dict | None = None, filename: str | None = None) -> None:
+    """上报一个自定义事件（服务端直采）。"""
+    _capture(event, props=props, filename=filename)
+
+
+def page_load() -> None:
+    """页面渲染：每个 session 首次渲染时发一次 page_viewed（rerun 不重发）。"""
+    import streamlit as st
+
+    if st.session_state.get("_page_viewed_sent"):
+        return
+    st.session_state["_page_viewed_sent"] = True
+    _capture(EV_PAGE_VIEWED)
 
 
 def clean_completed() -> None:
     """完成清洗统计事件（门 2 判据，与限流 cookie 分离）。"""
-    track(EV_CLEAN_COMPLETED)
+    _capture(EV_CLEAN_COMPLETED)
 
 
-def page_load() -> None:
-    """注入 PostHog bootstrap JS（$pageview 自动上报，门 3 分母）。"""
-    import streamlit as st
+def download_clicked(filename: str) -> None:
+    _capture(EV_DOWNLOAD_CLICKED, filename=filename)
 
-    snippet = _posthog_js_snippet()
-    if snippet:
-        st.markdown(snippet, unsafe_allow_html=True)
 
+def pro_click() -> None:
+    _capture(EV_PRO_CLICK)
+
+
+def file_uploaded(filename: str, rows: int = 0) -> None:
+    _capture(EV_FILE_UPLOADED, filename=filename, props={"rows": rows})
+
+
+def clean_started(files: int = 0) -> None:
+    _capture(EV_CLEAN_STARTED, props={"files": files})
+
+
+# ---------------------------------------------------------------------------
+# 限流（cookie qc_free，24h 每 session 1 次）
+# ---------------------------------------------------------------------------
 
 def _now_utc_ts() -> int:
     return int(time.time())
@@ -97,6 +135,8 @@ def set_free_cookie() -> None:
     """完成一次免费清洗后写 cookie qc_free=<now>（24h 有效）+ 上报 clean_completed。
 
     clean_completed 是门 2 统计事件，与限流 cookie（qc_free）分离（规格行 22）。
+    cookie 经 st.markdown 注入 JS 写（best-effort，sanitizer 剥离则静默失效，
+    不影响限流——限流权威值在 session_state，本实例内有效）。
     """
     import streamlit as st
 
@@ -112,11 +152,9 @@ def set_free_cookie() -> None:
 
 
 def read_free_cookie() -> int | None:
-    """读 cookie qc_free 的 ts（浏览器端）。
+    """读 cookie qc_free 的 ts（浏览器端，best-effort）。
 
-    Streamlit 没有直接读 cookie 的 API；注入 JS 把值写回 window 再由
-    下一轮 session_state 同步。L1 简化：直接读 session_state（本实例内），
-    cookie 作为跨实例重启的兜底标记（浏览器下次访问时 JS 同步）。
+    权威值在 session_state（本实例内）；cookie 作为跨实例重启的兜底标记。
     """
     import streamlit as st
 
@@ -126,7 +164,6 @@ def read_free_cookie() -> int | None:
         "if(m){window._qc_cookie_ts=m[2];}})();</script>",
         unsafe_allow_html=True,
     )
-    # 当前实例内权威值：session_state（重启才丢，cookie 兜底）
     return st.session_state.get(_COOKIE_NAME + "_ts")
 
 
@@ -145,7 +182,6 @@ def clean_blocked() -> bool:
 
     if is_free_available():
         return False
-    # 被限流：显示 PRO 引导（不收款），上报 pro_click 之外的 blocked 事件
     st.info(
         "Daily free clean used up (24h). "
         "PRO $49 unlocks batch + all brokers + Parquet. — "
@@ -154,15 +190,6 @@ def clean_blocked() -> bool:
     return True
 
 
-def download_clicked(filename: str) -> None:
-    track(EV_DOWNLOAD_CLICKED, filename=filename)
-
-
-def pro_click() -> None:
-    track(EV_PRO_CLICK)
-
-
 def session_id() -> str:
-    import streamlit as st
-
-    return st.session_id
+    """当前 session 的 distinct_id（门 2 去重口径）。"""
+    return _session_id()
