@@ -1,0 +1,13 @@
+[general]
+# Streamlit Community Cloud 免费层（规格 4.6）
+# 启动命令：streamlit run app.py
+runOnSave = false
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"

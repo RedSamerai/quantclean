@@ -1,0 +1,76 @@
+{
+  "$schema_note": "L1 broker 规则表（规格书 4.3 / 指令块 1）。L2 加 broker = 加一段，不碰代码。列名匹配 = 正则（大小写不敏感）。",
+  "$encoding_delimiter_policy": "encoding / delimiter 是文件级自动探测（UTF-16 BOM → utf-16-le，无 BOM 试 utf-8；分隔符从表头行判定 ; vs ,），不绑定 broker 规则。broker 的 encoding/delimiters 字段仅为'提示'（用于日志/报告标注），不是匹配必要条件。broker 匹配只用 列名 + 日期格式 组合。",
+  "brokers": [
+    {
+      "id": "mt5_default",
+      "name": "MT5 Default",
+      "match": {
+        "column_any": [
+          "Tick Volume",
+          "时间",
+          "成交量"
+        ],
+        "column_exclusive": [],
+        "optional_present": [],
+        "optional_absent": ["Spread", "点差"]
+      },
+      "date_formats": ["DD.MM.YYYY HH:MM:SS", "DD/MM/YYYY HH:MM:SS"],
+      "volume_col_names": ["Volume", "Tick Volume", "成交量"],
+      "encoding_hint": "utf-16-le",
+      "delimiter_hint": ";",
+      "timezone_hint_utc_offset": 3,
+      "note": "Default MT5 export: UTF-16LE, semicolons, DD.MM.YYYY, volume col = 成交量/Tick Volume. encoding/delimiter 仅为提示，不做匹配约束。"
+    },
+    {
+      "id": "blueberry",
+      "name": "Blueberry",
+      "match": {
+        "column_any": [
+          "Open", "开盘", "最高", "High", "Low", "最低", "Close", "收盘", "Time", "时间"
+        ],
+        "column_exclusive": ["Tick Volume", "成交量"],
+        "optional_present": ["Volume"],
+        "optional_absent": ["Spread", "点差"]
+      },
+      "date_formats": ["DD/MM/YYYY HH:MM:SS"],
+      "volume_col_names": ["Volume"],
+      "encoding_hint": "utf-16-le",
+      "delimiter_hint": ";",
+      "timezone_hint_utc_offset": 1,
+      "note": "Blueberry: plain 'Volume' (no Tick prefix), DD/MM/YYYY, 无 Spread 列, 24h crypto pairs have no weekend gap. encoding/delimiter 仅为提示。"
+    },
+    {
+      "id": "ic_markets",
+      "name": "IC Markets",
+      "match": {
+        "column_any": ["Open", "开盘", "High", "最高", "Low", "最低", "Close", "收盘", "Time", "时间"],
+        "column_exclusive": [],
+        "optional_present": ["Volume"],
+        "optional_absent": [],
+        "discard_columns": ["Spread", "点差"]
+      },
+      "date_formats": ["DD/MM/YYYY HH:MM:SS"],
+      "volume_col_names": ["Volume"],
+      "encoding_hint": "utf-16-le",
+      "delimiter_hint": ";",
+      "timezone_hint_utc_offset": 2,
+      "note": "IC Markets: 可含 Spread 列（映射前必须丢弃）；以 discard_columns 为特征区分 blueberry。encoding/delimiter 仅为提示。",
+      "discard_columns": ["Spread", "点差"]
+    }
+  ],
+  "date_format_candidates": [
+    "DD.MM.YYYY HH:MM:SS",
+    "DD/MM/YYYY HH:MM:SS",
+    "YYYY-MM-DDTHH:MM:SS",
+    "YYYY-MM-DDTHH:MM:SS+ZZ:ZZ"
+  ],
+  "period_seconds_map": {
+    "M1": 60,
+    "M5": 300,
+    "M15": 900,
+    "H1": 3600,
+    "H4": 14400,
+    "D1": 86400
+  }
+}
