@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """埋点 + 限流（规格 4.6，D2-3b 服务端直采 PostHog）。
 
-- PostHog 服务端直采：Python 直接 POST 到 {host}/api/capture/，
-  不依赖浏览器 JS（Streamlit sanitizer 会剥离 <script>，JS 注入方案作废）。
-  key 只从 os.environ（POSTHOG_PROJECT_API_KEY）读，代码里不留任何 key 值。
+- PostHog 服务端直采：Python 直接 POST 到 {host}/i/v0/e/（实测 200；
+  /api/capture/ 实测 404 不存在，勿用），不依赖浏览器 JS（Streamlit sanitizer
+  会剥离 <script>，JS 注入方案作废）。key 只从 os.environ
+  （POSTHOG_PROJECT_API_KEY）读，代码里不留任何 key 值。
   未设置 env → 静默跳过（不阻塞应用）。
 - 事件（6 个）：page_viewed / file_uploaded / clean_started /
   download_clicked / pro_click / clean_completed。
@@ -50,11 +51,12 @@ def _session_id() -> str:
 
 
 def _capture(event: str, props: dict | None = None, filename: str | None = None) -> None:
-    """服务端直采：POST {host}/api/capture/（PostHog 官方直采端点）。
+    """服务端直采：POST {host}/i/v0/e/（PostHog 官方直采端点，实测 200）。
 
     - 无 key → 直接 return（不发请求）
     - requests.post timeout=5s，整段 try/except 吞异常（上报失败不影响应用）
     - distinct_id = st.session_id；filename 脱敏成扩展名 + 行数
+    - body 字段名 api_key（实测 200；别改回 key）
     """
     if not _POSTHOG_API_KEY:
         return
@@ -76,7 +78,7 @@ def _capture(event: str, props: dict | None = None, filename: str | None = None)
     }
     try:
         requests.post(
-            f"{_POSTHOG_HOST}/api/capture/", json=body, timeout=5
+            f"{_POSTHOG_HOST}/i/v0/e/", json=body, timeout=5
         )
     except Exception:
         # 埋点失败绝不阻塞 / 崩溃应用

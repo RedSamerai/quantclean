@@ -47,7 +47,7 @@ def test_capture_sends_payload(env_key, monkeypatch):
 
     assert len(captured) == 1
     url, body, timeout = captured[0]
-    assert url == "https://us.posthog.com/api/capture/"
+    assert url == "https://us.posthog.com/i/v0/e/"
     assert body["api_key"] == "phc_test_key"
     assert body["event"] == "file_uploaded"
     assert body["properties"]["distinct_id"] == "sess_123"
