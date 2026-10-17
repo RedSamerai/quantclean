@@ -63,7 +63,9 @@ def _capture(event: str, props: dict | None = None, filename: str | None = None)
     """
     import streamlit as st
 
-    if not _POSTHOG_API_KEY:
+    # env 实时值优先（lazy read），模块常量兜底（供测试 mock）
+    key = os.environ.get("POSTHOG_PROJECT_API_KEY", "") or _POSTHOG_API_KEY
+    if not key:
         st.session_state["ph_status"] = "PH: NO KEY"
         return
 
@@ -78,7 +80,7 @@ def _capture(event: str, props: dict | None = None, filename: str | None = None)
     p["distinct_id"] = _session_id()
 
     body = {
-        "api_key": _POSTHOG_API_KEY,
+        "api_key": key,
         "event": event,
         "properties": p,
     }

@@ -102,6 +102,10 @@ if ok_files and st.button("Continue to review"):
 
 # 屏 1 角落诊断：PostHog 追踪链状态（NO KEY / OK 200 / FAIL / NOT CALLED）
 st.caption(getattr(track, "last_status", lambda: "PH: MISSING (track module 旧版)")())
+# env 探针：定位 Cloud secret 注入 / lazy read 问题
+st.caption(f"env: KEY={'Y' if os.environ.get('POSTHOG_PROJECT_API_KEY') else 'N'} | "
+           f"PH_PROBE={os.environ.get('PH_PROBE','ABSENT')} | "
+           f"track_cached={'Y' if track._POSTHOG_API_KEY else 'N'}")
 
 # ---------------------------------------------------------------------------
 # 屏 2 · 检测 + 映射确认

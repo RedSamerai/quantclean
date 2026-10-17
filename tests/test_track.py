@@ -162,3 +162,26 @@ def test_session_id_fallback(monkeypatch):
     sid = track._session_id()
     # bare 环境没有 ScriptRunContext → st.session_id 为 None → 回退 'unknown'
     assert isinstance(sid, str) and len(sid) > 0
+
+
+def test_env_key_lazy_read(monkeypatch):
+    """_capture 优先用 env 实时值（lazy read），模块常量作兜底。
+
+    场景：模块 import 时 env 没设（_POSTHOG_API_KEY=""），但运行时 env 有值
+    → 用 env 的值发请求。
+    """
+    captured = []
+
+    def fake_post(url, json=None, timeout=None):
+        captured.append(json)
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(track, "_POSTHOG_API_KEY", "")  # 模块常量空（import 时无 env）
+    monkeypatch.setattr(track, "_POSTHOG_HOST", "https://us.posthog.com")
+    monkeypatch.setenv("POSTHOG_PROJECT_API_KEY", "phc_runtime_key")
+    monkeypatch.setattr(track, "_session_id", lambda: "s")
+
+    track.track("clean_started")
+
+    assert len(captured) == 1
+    assert captured[0]["api_key"] == "phc_runtime_key"  # 用了 env 实时值，不是模块常量
