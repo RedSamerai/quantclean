@@ -53,12 +53,18 @@ def _session_id() -> str:
 def _capture(event: str, props: dict | None = None, filename: str | None = None) -> None:
     """服务端直采：POST {host}/i/v0/e/（PostHog 官方直采端点，实测 200）。
 
-    - 无 key → 直接 return（不发请求）
-    - requests.post timeout=5s，整段 try/except 吞异常（上报失败不影响应用）
+    - 无 key → 直接 return（不发请求），状态写 "PH: NO KEY"
+    - requests.post timeout=5s，try/except 吞异常（上报失败不影响应用）
     - distinct_id = st.session_id；filename 脱敏成扩展名 + 行数
     - body 字段名 api_key（实测 200；别改回 key）
+    - 状态写 st.session_state["ph_status"]（200→"PH: OK 200 {event}" /
+      异常→"PH: FAIL {异常类名}: {简述}" / 无 key→"PH: NO KEY"）
+      绝不打印 key 值，供屏 1 角落显示诊断。
     """
+    import streamlit as st
+
     if not _POSTHOG_API_KEY:
+        st.session_state["ph_status"] = "PH: NO KEY"
         return
 
     import requests
@@ -77,12 +83,23 @@ def _capture(event: str, props: dict | None = None, filename: str | None = None)
         "properties": p,
     }
     try:
-        requests.post(
+        resp = requests.post(
             f"{_POSTHOG_HOST}/i/v0/e/", json=body, timeout=5
         )
-    except Exception:
-        # 埋点失败绝不阻塞 / 崩溃应用
-        pass
+        if resp.status_code == 200:
+            st.session_state["ph_status"] = f"PH: OK 200 {event}"
+        else:
+            st.session_state["ph_status"] = f"PH: FAIL HTTP {resp.status_code}"
+    except Exception as e:
+        # 埋点失败绝不阻塞 / 崩溃应用；异常名不含 key 值
+        st.session_state["ph_status"] = f"PH: FAIL {type(e).__name__}: {str(e)[:40]}"
+
+
+def last_status() -> str:
+    """返回最近一次 _capture 的状态串（屏 1 角落诊断用）。"""
+    import streamlit as st
+
+    return st.session_state.get("ph_status", "PH: NOT CALLED")
 
 
 # ---------------------------------------------------------------------------

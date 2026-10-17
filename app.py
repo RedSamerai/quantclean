@@ -100,6 +100,9 @@ if ok_files and st.button("Continue to review"):
     st.session_state["step"] = 2
     st.rerun()
 
+# 屏 1 角落诊断：PostHog 追踪链状态（NO KEY / OK 200 / FAIL / NOT CALLED）
+st.caption(track.last_status())
+
 # ---------------------------------------------------------------------------
 # 屏 2 · 检测 + 映射确认
 # ---------------------------------------------------------------------------

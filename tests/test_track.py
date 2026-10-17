@@ -124,6 +124,39 @@ def test_page_viewed_once_per_session(env_key, monkeypatch):
     assert n2 == 1, "rerun 不应重发"
 
 
+def test_no_key_status_no_key(no_key, monkeypatch):
+    """无 key → ph_status 写 "PH: NO KEY"，且零请求。"""
+    calls = []
+    monkeypatch.setattr(requests, "post", lambda *a, **k: calls.append(1))
+    import streamlit as st
+    st.session_state.clear()
+    track.track("clean_started")
+    assert calls == []
+    assert st.session_state.get("ph_status") == "PH: NO KEY"
+
+
+def test_status_ok_200(env_key, monkeypatch):
+    """POST 返回 200 → ph_status 写 "PH: OK 200 {event}"。"""
+    import requests
+    import streamlit as st
+    st.session_state.clear()
+
+    class FakeResp:
+        status_code = 200
+
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResp())
+    monkeypatch.setattr(track, "_session_id", lambda: "s")
+    track.track("clean_started")
+    assert st.session_state.get("ph_status") == "PH: OK 200 clean_started"
+
+
+def test_last_status_default(monkeypatch):
+    """从未调 _capture → last_status 返回 "PH: NOT CALLED"。"""
+    import streamlit as st
+    st.session_state.clear()
+    assert track.last_status() == "PH: NOT CALLED"
+
+
 def test_session_id_fallback(monkeypatch):
     """_session_id 在 bare 环境（st.session_id 为 None）回退 'unknown'，不崩。"""
     sid = track._session_id()
