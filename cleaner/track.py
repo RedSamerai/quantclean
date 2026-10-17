@@ -43,11 +43,20 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _session_id() -> str:
-    """当前 session 的 distinct_id；bare 环境无 context 时回退 'unknown'。"""
-    import streamlit as st
+    """当前 session 的 distinct_id；bare 环境无 context 时回退 'unknown'。
 
-    sid = getattr(st, "session_id", None)
-    return sid if sid is not None else "unknown"
+    正确 API（Streamlit 1.66）：streamlit.runtime.scriptrunner.get_script_run_ctx()
+    运行时取 .session_id。st.session_id / st.context.session_id 在 1.66 均不存在
+    （hasattr 实查为 False），勿用。
+    """
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        ctx = get_script_run_ctx()
+        sid = getattr(ctx, "session_id", None) if ctx is not None else None
+        return sid or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _capture(event: str, props: dict | None = None, filename: str | None = None) -> None:

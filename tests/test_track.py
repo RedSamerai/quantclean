@@ -158,9 +158,11 @@ def test_last_status_default(monkeypatch):
 
 
 def test_session_id_fallback(monkeypatch):
-    """_session_id 在 bare 环境（st.session_id 为 None）回退 'unknown'，不崩。"""
+    """_session_id 在 bare 环境（无 ScriptRunContext）回退 'unknown'，不崩。
+
+    正确 API = get_script_run_ctx().session_id；bare 环境 ctx 为 None → 回退 'unknown'。
+    """
     sid = track._session_id()
-    # bare 环境没有 ScriptRunContext → st.session_id 为 None → 回退 'unknown'
     assert isinstance(sid, str) and len(sid) > 0
 
 
