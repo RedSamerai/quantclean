@@ -101,16 +101,13 @@ if ok_files and st.button("Continue to review"):
     st.rerun()
 
 # 屏 1 角落诊断：PostHog 追踪链状态（NO KEY / OK 200 / FAIL / NOT CALLED）
-st.caption(track.last_status())
+st.caption(getattr(track, "last_status", lambda: "PH: MISSING (track module 旧版)")())
 
 # ---------------------------------------------------------------------------
 # 屏 2 · 检测 + 映射确认
 # ---------------------------------------------------------------------------
 if st.session_state.get("step") == 2 and ok_files:
     st.title("Detected — confirm mapping")
-    st.caption(
-        "Detected: MetaTrader 5 · {BROKER} · {TF} · {START} → {END} · {ROWS} rows"
-    )
     tz_index = 0
     for i, f in enumerate(ok_files):
         p = f["parsed"]
