@@ -37,5 +37,7 @@ Python 3.12+ recommended. No data files are bundled with this repo — the app w
 
 ## Notes
 
+- Live demo runs on Streamlit's free tier — after a period of inactivity the first load can take 30–60 s. If you see the "Zzzz" sleep page, click the button to wake it.
+
 - Timezone: the report always states the assumed session (broker-local). Confirm before backtesting across sessions.
 - Gap-free ratio ≥ 99% and zero duplicate bars is a healthy baseline for most strategies.
